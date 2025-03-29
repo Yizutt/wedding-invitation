@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我们的婚礼邀请函</title>
+    <style>
+        /* 基础样式 */
+        body {
+            background: #f8f3eb;
+            font-family: 'Microsoft YaHei';
+        }
+        
+        /* 封面设计 */
+        .cover {
+            height: 100vh;
+            background: url('cover-bg.jpg') center/cover;
+            position: relative;
+        }
+        
+        /* 二维码样式 */
+        .qrcode {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 120px;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+    <!-- 封面模块 -->
+    <section class="cover">
+        <h1>诚挚邀请</h1>
+        <div class="couple-photo">
+            <img src="couple.jpg" alt="新人照片">
+        </div>
+        <!-- 微信二维码 -->
+        <img src="wedding-qrcode.png" class="qrcode" alt="扫码访问">
+    </section>
+
+    <!-- 其他模块（时间地点、相册等） -->
+    <section class="details">
+        <!-- 使用flex布局实现响应式设计 -->
+    </section>
+
+    <!-- 背景音乐 -->
+    <audio id="bgm" loop>
+        <source src="wedding-song.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+        // 自动播放音乐（需用户交互后触发）
+        document.addEventListener('click', function() {
+            document.getElementById('bgm').play()
+        })
+        
+        // 轮播图功能
+        const swiper = new Swiper('.swiper-container', {
+            loop: true,
+            autoplay: 3000
+        })
+    </script>
+</body>
+</html>
