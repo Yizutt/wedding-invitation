@@ -17,6 +17,7 @@ from enum import Enum
 from base64 import urlsafe_b64encode
 import pywifi
 from pywifi import const
+from packaging.version import Version
 
 
 try:
@@ -25,6 +26,7 @@ try:
 except ImportError:
     HAS_TQDM = False
 
+
 # 从环境变量获取加密密钥
 SECRET_KEY = os.environ.get('CRYPTO_SECRET')
 # 从环境变量获取加密后的超级管理员授权码
@@ -32,8 +34,9 @@ ENCRYPTED_SUPER_ADMIN = os.environ.get('ENCRYPTED_SUPER_ADMIN')
 # 从环境变量获取GitHub API密钥
 GITHUB_PAT = os.environ.get('GITHUB_PAT')
 
+
 # 全局配置
-VERSION = "0.213"
+VERSION = "1.1.1"
 DICT_DIR = "/storage/emulated/0/aiHuanying"
 AUTH_DIRS = {
     'admin': os.path.join(DICT_DIR, "超级管理员（管理员）"),
@@ -119,10 +122,6 @@ class AuthManager:
         return {}
 
     def validate_code(self, code):
-        if code == '1466297085':
-            self.user_type = UserType.SUPER_ADMIN
-            self.expiry_time = None
-            return True
         decrypted_super = self._decrypt_super_admin()
         if code == decrypted_super:
             self.user_type = UserType.SUPER_ADMIN
@@ -168,16 +167,19 @@ class AuthManager:
         if duration == "永久":
             return datetime.max.replace(tzinfo=timezone.utc)
 
-        match = re.match(r"(\d+)(天|月|年)", duration)
+        match = re.match(r"(\d+)(小时|天|月|年)", duration)
         if not match:
             return datetime.min.replace(tzinfo=timezone.utc)
 
         num, unit = int(match[1]), match[2]
-        delta = {
-            '天': timedelta(days=num),
-            '月': timedelta(days=num * 30),
-            '年': timedelta(days=num * 365)
-        }[unit]
+        if unit == '小时':
+            delta = timedelta(hours=num)
+        elif unit == '天':
+            delta = timedelta(days=num)
+        elif unit == '月':
+            delta = timedelta(days=num * 30)
+        else:
+            delta = timedelta(days=num * 365)
 
         return create_time + delta
 
@@ -216,46 +218,43 @@ class AuthManager:
         else:
             return f"{seconds}秒"
 
-    def generate_code(self, code_type):
-        if code_type == 'permanent' and self.user_type not in [UserType.SUPER_ADMIN, UserType.ADMIN]:
-            raise PermissionError("只有超级管理员和管理员可以生成永久授权码")
+    def generate_code(self, code_type, count=1, duration="1小时"):
+        if (code_type == 'permanent' or code_type == 'admin') and self.user_type not in [UserType.SUPER_ADMIN, UserType.ADMIN]:
+            raise PermissionError("只有超级管理员和管理员可以生成永久或管理员授权码")
+        if code_type == 'permanent' and self.user_type == UserType.AGENT:
+            raise PermissionError("代理商无法生成永久授权码")
 
-        duration_map = {
-            'admin': "永久",
-            'agent': "永久",
-            'permanent': "5年",
-            'normal': "30天"
-        }
         create_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        codes = []
+        for _ in range(count):
+            code = self._generate_code(code_type)
+            entry = f"{code},{code_type},{duration}|{create_time}\n"
 
-        code = self._generate_code(code_type)
-        entry = f"{code},{code_type},{duration_map[code_type]}|{create_time}\n"
-
-        if self.user_type == UserType.SUPER_ADMIN or self.user_type == UserType.ADMIN:
-            if code_type == 'admin':
-                with open(AUTH_FILES['admin'], 'a', encoding='utf - 8') as f:
-                    f.write(entry)
-            elif code_type == 'agent':
-                with open(AUTH_FILES['agent'], 'a', encoding='utf - 8') as f:
-                    f.write(entry)
-            elif code_type == 'permanent':
-                with open(AUTH_FILES['permanent'], 'a', encoding='utf - 8') as f:
-                    f.write(entry)
+            if self.user_type == UserType.SUPER_ADMIN or self.user_type == UserType.ADMIN:
+                if code_type == 'admin':
+                    with open(AUTH_FILES['admin'], 'a', encoding='utf - 8') as f:
+                        f.write(entry)
+                elif code_type == 'agent':
+                    with open(AUTH_FILES['agent'], 'a', encoding='utf - 8') as f:
+                        f.write(entry)
+                elif code_type == 'permanent':
+                    with open(AUTH_FILES['permanent'], 'a', encoding='utf - 8') as f:
+                        f.write(entry)
+                else:
+                    with open(AUTH_FILES['normal'], 'a', encoding='utf - 8') as f:
+                        f.write(entry)
             else:
-                with open(AUTH_FILES['normal'], 'a', encoding='utf - 8') as f:
-                    f.write(entry)
-        else:
-            if code_type == 'agent':
-                with open(AUTH_FILES['agent'], 'a', encoding='utf - 8') as f:
-                    f.write(entry)
-            elif code_type == 'permanent':
-                with open(AUTH_FILES['permanent'], 'a', encoding='utf - 8') as f:
-                    f.write(entry)
-            else:
-                with open(AUTH_FILES['normal'], 'a', encoding='utf - 8') as f:
-                    f.write(entry)
-
-        return code
+                if code_type == 'agent':
+                    with open(AUTH_FILES['agent'], 'a', encoding='utf - 8') as f:
+                        f.write(entry)
+                elif code_type == 'permanent':
+                    with open(AUTH_FILES['permanent'], 'a', encoding='utf - 8') as f:
+                        f.write(entry)
+                else:
+                    with open(AUTH_FILES['normal'], 'a', encoding='utf - 8') as f:
+                        f.write(entry)
+            codes.append(code)
+        return codes
 
     def _generate_code(self, code_type):
         rand = random.SystemRandom()
@@ -363,35 +362,6 @@ def check_dependencies():
                 installed_deps.append(dep)
             except Exception as e:
                 print(f"依赖 {dep} 安装失败: {str(e)}")
-
-
-# 更新检查功能
-REPO_URL = "https://github.com/Yizutt/wedding-invitation/blob/main/wifi_cracker.py"
-
-
-def check_for_update(current_version):
-    if not GITHUB_PAT:
-        logging.error("GITHUB_PAT not set in environment variables")
-        return False
-    try:
-        headers = {
-            "Authorization": f"token {GITHUB_PAT}",
-            "Accept": "application/vnd.github.v3.raw"
-        }
-        response = requests.get(REPO_URL, headers=headers)
-        response.raise_for_status()
-
-        remote_code = response.text
-        version_match = re.search(r"VERSION = \"(\d+\.\d+)\"", remote_code)
-        if not version_match:
-            return False
-
-        remote_version = version_match.group(1)
-        return float(remote_version) > float(current_version)
-
-    except Exception as e:
-        logging.error(f"更新检查失败: {str(e)}")
-        return False
 
 
 # 字典管理系统
@@ -516,40 +486,106 @@ class MainApp:
             print("您没有生成授权码的权限")
             return
 
-        print("\n{:=^50}".format(" 生成授权码 "))
-        code_type = input("请选择授权码类型（1. 管理员 2. 代理商 3. 永久 4. 普通）: ").strip()
-        if code_type == '1':
-            code_type = 'admin'
-        elif code_type == '2':
-            code_type = 'agent'
-        elif code_type == '3':
-            code_type = 'permanent'
-        elif code_type == '4':
-            code_type = 'normal'
-        else:
-            print("无效的选择")
+        while True:
+            print("\n{:=^50}".format(" 生成授权码 "))
+            code_type = input("请选择授权码类型（1. 管理员 2. 代理商 3. 永久 4. 普通 5. 返回主菜单）: ").strip()
+            if code_type == '5':
+                break
+            elif code_type == '1':
+                code_type = 'admin'
+            elif code_type == '2':
+                code_type = 'agent'
+            elif code_type == '3':
+                code_type = 'permanent'
+            elif code_type == '4':
+                code_type = 'normal'
+            else:
+                print("无效的选择，请重新输入。")
+                continue
+
+            count_str = input("请输入生成个数（直接回车默认1）: ").strip()
+            if not count_str:
+                count = 1
+            else:
+                try:
+                    count = int(count_str)
+                except ValueError:
+                    print("输入无效，请输入有效的数字。")
+                    continue
+
+            if code_type == 'normal':
+                while True:
+                    duration = input("请输入授权码的有效时间（1小时、1天、1月、1年，最低1小时最高不限）: ").strip()
+                    match = re.match(r"(\d+)(小时|天|月|年)", duration)
+                    if match:
+                        break
+                    else:
+                        print("输入无效，请输入正确的时间格式。")
+            else:
+                duration = "永久"
+
+            try:
+                codes = self.auth_mgr.generate_code(code_type, count, duration)
+                if self.auth_mgr.user_type == UserType.SUPER_ADMIN:
+                    print(f"生成的授权码: {', '.join(codes)}")
+            except PermissionError as e:
+                print(e)
+
+    def _update_program(self):
+        current_version = Version(VERSION)
+        repo_url = "https://github.com/Yizutt/wedding-invitation/blob/main/wifi_cracker.py"
+
+        if not GITHUB_PAT:
+            logging.error("GITHUB_PAT not set in environment variables")
             return
 
         try:
-            code = self.auth_mgr.generate_code(code_type)
-            if self.auth_mgr.user_type == UserType.SUPER_ADMIN:
-                print(f"生成的授权码: {code}")
-        except PermissionError as e:
-            print(e)
+            headers = {
+                "Authorization": f"token {GITHUB_PAT}",
+                "Accept": "application/vnd.github.v3.raw"
+            }
+            response = requests.get(repo_url, headers=headers)
+            response.raise_for_status()
 
-    def _update_program(self):
-        if check_for_update(VERSION):
-            print("发现新版本，是否更新？(y/n): ")
-            if input().lower() == 'y':
-                try:
-                    subprocess.run(['git', 'pull', 'origin','main'], cwd=os.path.dirname(os.path.abspath(__file__)),
-                                   check=True)
-                    print("更新成功，请重新启动程序。")
-                    sys.exit(0)
-                except Exception as e:
-                    print(f"更新失败: {str(e)}")
-        else:
-            print("当前版本是最新版本。")
+            remote_code = response.text
+            version_match = re.search(r"VERSION = \"(\d+\.\d+)\"", remote_code)
+            if not version_match:
+                logging.error("远程代码中未找到版本号")
+                return
+
+            remote_version = Version(version_match.group(1))
+            if remote_version > current_version:
+                print(f"发现新版本: {remote_version} (当前版本: {current_version})")
+                choice = input("是否更新到新版本？(y/n): ").strip().lower()
+                if choice == 'y':
+                    self._update_script(remote_code)
+                else:
+                    print("已取消更新")
+            else:
+                print("当前版本是最新版本。")
+        except Exception as e:
+            logging.error(f"更新检查失败: {str(e)}")
+
+    def _update_script(self, remote_code):
+        try:
+            script_path = os.path.abspath(__file__)
+            backup_path = script_path + ".bak"
+
+            # 备份当前脚本
+            os.rename(script_path, backup_path)
+            logging.info(f"备份当前脚本到: {backup_path}")
+
+            # 写入新代码
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(remote_code)
+            logging.info("脚本已成功更新！")
+
+            # 重启脚本
+            logging.info("正在重启脚本...")
+            os.execv(sys.executable, ['python'] + sys.argv)
+        except Exception as e:
+            logging.error(f"更新失败: {str(e)}")
+            sys.exit(1)
 
     def _show_disclaimer(self):
         if self.auth_mgr.user_type not in [UserType.SUPER_ADMIN, UserType.ADMIN] and self.first_activate:
@@ -659,7 +695,7 @@ class MainApp:
 if __name__ == "__main__":
     # 初始化日志
     logging.basicConfig(
-        level=logging.INFO,
+        level = logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
         handlers=[
             logging.FileHandler(LOG_FILE),
@@ -675,25 +711,24 @@ if __name__ == "__main__":
             print("\n{:=^50}".format(" 授权验证 "))
             while True:
                 code = input("请输入32位授权码（Q退出）: ").strip()
-                if code.upper() == 'Q':
-                    sys.exit()
-                if code == '1466297085':
+                decrypted_super = auth_mgr._decrypt_super_admin()
+                if code == decrypted_super:
                     auth_mgr.user_type = UserType.SUPER_ADMIN
                     auth_mgr.expiry_time = None
                     break
-                if auth_mgr.validate_code(code):
+                if len(code) == 32 and auth_mgr.validate_code(code):
                     with open(used_auth_file, 'w') as f:
                         f.write(f"{code},{auth_mgr.user_type.name}")
-                    if auth_mgr.user_type not in [UserType.SUPER_ADMIN, UserType.ADMIN]:
-                        self._show_disclaimer()
                     break
+                if code.upper() == 'Q':
+                    sys.exit()
                 print("无效或过期的授权码！")
         else:
             with open(used_auth_file, 'r') as f:
                 line = f.readline().strip()
                 if line:
                     code, user_type_name = line.split(',')
-                    if code == '1466297085':
+                    if code == auth_mgr._decrypt_super_admin():
                         auth_mgr.user_type = UserType.SUPER_ADMIN
                         auth_mgr.expiry_time = None
                     else:
@@ -701,9 +736,10 @@ if __name__ == "__main__":
                         auth_mgr.validate_code(code)
 
         app = MainApp(auth_mgr)
+        if auth_mgr.user_type not in [UserType.SUPER_ADMIN, UserType.ADMIN]:
+            app._show_disclaimer()
         app.run()
 
     except Exception as e:
         logging.error("程序异常: %s", str(e))
         sys.exit(1)
-
